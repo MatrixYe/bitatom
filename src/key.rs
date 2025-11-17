@@ -6,11 +6,11 @@ use ripemd::Ripemd160;
 ///
 /// @Author Matrix.Ye
 ///
-/// @Description: 数字签名工具
+/// @Description: 密钥对工具
 use secp256k1::ecdsa::Signature;
-use secp256k1::hashes::{sha256, Hash};
-use secp256k1::{rand, PublicKey, SecretKey};
+use secp256k1::hashes::{Hash, sha256};
 use secp256k1::{All, Message, Secp256k1};
+use secp256k1::{PublicKey, SecretKey, rand};
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone)]
@@ -62,27 +62,21 @@ impl Keypair {
     }
 
     // 生成比特币地址：地址=版本号+双哈希+校验码
-    pub fn to_address(&self, v: u8) -> String {
-        // 第一次哈吉米：sha256
-        let s1 = Sha256::digest(&self.public_key.serialize()); //压缩公钥
-        let public_key_bytes = self.public_key.serialize();
-        let sha256_hash = Sha256::digest(&public_key_bytes); //第一次哈希，sha256
-        // 第二次哈希：ripemd160
-        let mut ripemd160_hasher = Ripemd160::new();
-        ripemd160_hasher.update(sha256_hash);
-        let ripemd160_hash = ripemd160_hasher.finalize();
-        // 添加版本号，蛛网0x00
-        let mut address_vec = vec![0x00];
-        address_vec.extend_from_slice(&ripemd160_hash.as_slice());
-        // 添加校验码
-        let checksum = Sha256::digest(&Sha256::digest(&address_vec));
-        address_vec.extend_from_slice(&checksum[..4]); //取后面四位
-        // 最后进行Base58 编码
-        bs58::encode(address_vec).into_string()
+    pub fn to_address(&self) -> String {
+        let x = 1;
+        let pk = self.public_key.serialize(); //公钥
+        let sha256 = Sha256::digest(pk); //公钥第一次哈希
+        let ripemd160 = Ripemd160::digest(sha256); //公钥第二次哈希
+        let mut payload = Vec::with_capacity(1 + 20 + 4); //负载=版本号+双哈希+校验码
+        payload.push(0x00); //添加版本号，主网为0x00
+        payload.extend_from_slice(ripemd160.as_slice()); //添加公钥双哈希
+        let checksum = Sha256::digest(Sha256::digest(&payload)); //取前4字节作为校验码
+        payload.extend_from_slice(&checksum[..4]);
+        bs58::encode(payload).into_string() //base58编码
     }
 }
 
-// 使用私钥进行签名，返回数字签名Sig
+// 使用私钥进行签名，返回数字签名Signature
 pub fn sign(keypair: &Keypair, content: &[u8]) -> Signature {
     let secp = Secp256k1::<All>::new();
     let digest = sha256::Hash::hash(content);
@@ -172,9 +166,10 @@ mod tests {
         println!("secret_key:{:?}", secret_key);
         println!("public_key:{:?}", public_key);
 
-        let sig = sign(&keypair, b"Hello, world!");
-        let ok = verify(b"Hello, world!", &keypair.public_key, &sig);
-        println!("sig: {:?}", hex::decode(sig.serialize_compact()).unwrap());
+        let sig = sign(&keypair, b"Hello,world!");
+        let ok: bool = verify(b"Hello,world!", &keypair.public_key, &sig);
+        assert!(ok);
+        println!("sig: {:?}", hex::encode(sig.serialize_compact()));
         println!("ok: {:?}", ok);
     }
 
@@ -210,9 +205,10 @@ mod tests {
         );
 
         // 生成比特币地址
-        let address = keypair.to_address(0x00);
+        let address = keypair.to_address();
 
         println!("Bitcoin Address: {}", address);
+        assert_eq!(address, "1G1fWxQ6sMiKhSk3eoWwQijTMahjzcS1xG".to_string());
 
         // 验证地址格式（比特币地址通常以1开头，长度在26-35个字符之间）
         assert!(address.as_str().starts_with("1"));
